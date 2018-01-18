@@ -1,6 +1,7 @@
-
+import csv
 from selenium import webdriver
 from selenium.webdriver.support.ui import Select
+import selenium
 import bs4
 import urllib.request as req
 import re
@@ -9,8 +10,10 @@ from time import sleep
 import time
 import requests
 import os
+from collections import Counter
+import nltk
 
-text_file_name = "news"
+text_file_name = ""
 
 def get_url_list(input_date):
     eval_d = input_date
@@ -181,48 +184,109 @@ def ext_body(html_text):
     return body
 
 def auto_translate(input_text, driver):
-    driver.find_element_by_id('txtSource').send_keys(input_text)
-    sleep(1)
-    driver.find_element_by_id("btnTranslate").click()
-    while not driver.find_element_by_id('txtTarget').text:
-        sleep(1)
+    print("auto_translate() is called")
+    try:
+        driver.find_element_by_id('txtSource').send_keys(input_text)
+    except selenium.common.exceptions.UnexpectedAlertPresentException:
+        print("you have exceeded the maximum number of characters")
+        click_translate(driver)
+    click_translate(driver)
     translated_text = driver.find_element_by_id('txtTarget').text
     file_write(text_file_name, translated_text)
     driver.refresh()
 
+def click_translate(driver):
+    try:
+        driver.find_element_by_id("btnTranslate").click()
+        while not driver.find_element_by_id('txtTarget').text:
+            sleep(1)
+    except selenium.common.exceptions.NoSuchElementException:
+        sleep(3)
+        print("network connection is not stable")
+        click_translate(driver)
+
+
+def empty_existing_file(filename):
+    # existing_file = open(filename, "w", encoding="utf-8")
+    # print("", file=existing_file)
+    # existing_file.close()
+    with open (filename + ".csv", "w", encoding="utf-8") as existing_file:
+        pencil = csv.writer(existing_file)
+        pencil.writerow("")
 
 def file_write(filename, text):
-    print("file write is called, text length : %d" % len(text))
-    translated_file = open(filename, "a", encoding="utf-8")
-    print(text, file=translated_file)
-    translated_file.close()
+    # print("file write is called, text length : %d" % len(text))
+    # translated_file = open(filename, "a", encoding="utf-8")
+    # print(text, file=translated_file)
+    # translated_file.close()
+    with open (filename + ".csv", "a", encoding="utf-8" ) as translated_file:
+        pencil = csv.writer(translated_file)
+        pencil.writerow([text])
+
+def long_article_handler(old, new, driver):
+    auto_translate(old, driver)
+    iteration = len(new) // 5000
+    print("length = %d, iteration = %d" % (len(new), iteration))
+    for i in range(0, iteration):
+        start = i * 5000
+        end = (i+1) * 5000 - 1
+        print("i : %d, start = %d, end = %d" % (i, start, end))
+        auto_translate(new[start:end], driver)
+
+    return new[end:]
+
+def word_count_en(filename):
+    doc_en = open(filename, 'r')
+    total = []
+    while True:
+        line = doc_en.readline()
+        texts = nltk.word_tokenize(line)
+        if not line:
+            break
+        total += texts
+    nonPunct = re.compile('.*[A-Za-z0-9].*')
+    filtered = [w for w in total if nonPunct.match(w)]
+    counts = Counter(filtered)
+    print(counts)
+    doc_en.close()
+
+
 
 if __name__ == "__main__":
     """
     네이버 뉴스기사를 수집한다.
     :return:
     """
+    #driver = webdriver.Chrome()
     driver = webdriver.Chrome('/Users/Celine/Documents/Projects/Picasso/chromedriver')
     #driver = webdriver.PhantomJS('/Users/Celine/Documents/Projects/Picasso/phantomjs_macosx/bin/phantomjs')
     driver.get('http://papago.naver.com/')
 
-    #text_file = create_text_file(text_file_name)
-
-    input_text = ""
-
     date = input('type in date : ')
-    text_file_name += date
-    urls = get_url_list(date)
-    for url in urls:
-        print_url = gen_print_url(url)
-        html = get_html(print_url)
-        new_input = ext_body(html)
-        #print("input text length : %d, new input text length : %d" % (len(input_text), len(new_input)))
 
-        if len(input_text) + len(new_input) > 5000:
-            auto_translate(input_text, driver)
-            input_text = new_input
-        else:
-            input_text += new_input
+    while True:
+        print("date : %s" % date)
+        input_text = ""
+        text_file_name = date
+        empty_existing_file(text_file_name)
+        count = 0
+        urls = get_url_list(date)
+        for url in urls:
+            print("count : %d" %count)
+            count += 1
+            print_url = gen_print_url(url)
+            html = get_html(print_url)
+            new_input = ext_body(html)
+            if len(new_input) >= 5000:
+                input_text = long_article_handler(input_text, new_input, driver)
+            elif len(input_text) + len(new_input) >= 5000:
+                auto_translate(input_text, driver)
+                input_text = new_input
+            else:
+                input_text += new_input
+        date = int(date) - 1
+        print("int(date) : %d" %date)
+        date = str(date)
+        print('str(date : %s' %date)
 
     driver.quit()
